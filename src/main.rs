@@ -171,6 +171,12 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> Result<()> {
         KeyCode::BackTab => {
             app.prev_tab();
         }
+        KeyCode::Char('n') | KeyCode::Char('N') if app.show_confirm => {
+            app.show_confirm = false;
+            app.confirm_message.clear();
+            app.pending_hex_load = None;
+            app.set_status("Checkpoint cancelled".to_string());
+        }
         KeyCode::Char(' ') => {
             if app.is_searching {
                 app.search_query.push(' ');
@@ -351,36 +357,35 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> Result<()> {
         }
         KeyCode::Char('c') => {
             if let Some(proc) = app.selected_process().cloned() {
-                let checkpoint_path = PathBuf::from(&app.checkpoint_dir).join(format!(
-                    "ckpt_{}_{}",
-                    proc.pid,
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs()
-                ));
-
-                app.set_status(format!("Creating checkpoint for PID {}...", proc.pid));
-
-                let runner = wrapper::CkptminiRunner::new(PathBuf::from(&app.ckptmini_path));
-                match runner.save(proc.pid, &checkpoint_path) {
-                    Ok(_) => {
-                        let meta = serde_json::json!({
-                            "pid": proc.pid,
-                            "command": proc.name,
-                        });
-                        let _ = std::fs::write(
-                            checkpoint_path.join("meta.json"),
-                            serde_json::to_string_pretty(&meta).unwrap_or_default(),
-                        );
-                        app.set_status(format!("Checkpoint saved to {:?}", checkpoint_path));
-                        refresh_checkpoints(app)?;
-                    }
-                    Err(e) => {
-                        app.set_error(format!("Checkpoint failed: {}", e));
-                    }
+                const GB: u64 = 1024 * 1024 * 1024;
+                if app.total_memory_size > GB {
+                    app.pending_hex_load = Some((proc.pid as u64, 0));
+                    app.show_confirm = true;
+                    app.confirm_message = format!(
+                        "Total memory is {:.1} GB. Create checkpoint? [y/n]",
+                        app.total_memory_size as f64 / GB as f64
+                    );
+                    app.set_status(app.confirm_message.clone());
+                } else {
+                    create_checkpoint(app, proc)?;
                 }
             }
+        }
+        KeyCode::Char('y') | KeyCode::Char('Y') if app.show_confirm => {
+            if let Some((pid, 0)) = app.pending_hex_load {
+                if let Some(proc) = app.processes.iter().find(|p| p.pid as u64 == pid).cloned() {
+                    create_checkpoint(app, proc)?;
+                }
+            }
+            app.show_confirm = false;
+            app.confirm_message.clear();
+            app.pending_hex_load = None;
+        }
+        KeyCode::Char('n') if app.show_confirm => {
+            app.show_confirm = false;
+            app.confirm_message.clear();
+            app.pending_hex_load = None;
+            app.set_status("Checkpoint cancelled".to_string());
         }
         KeyCode::Char('u') => {
             if matches!(app.tab, Tab::Checkpoints) {
@@ -901,15 +906,19 @@ fn load_memory_regions(app: &mut App, pid: u32) -> Result<()> {
         Ok(output) => {
             app.dump_output = output.clone();
             app.memory_regions = wrapper::parser::parse_memory_regions(&output);
+            app.total_memory_size = app.memory_regions.iter().map(|r| r.end - r.start).sum();
+            let total_mb = app.total_memory_size / (1024 * 1024);
             app.set_status(format!(
-                "Loaded {} memory regions",
-                app.memory_regions.len()
+                "Loaded {} memory regions ({:.1} MB)",
+                app.memory_regions.len(),
+                total_mb
             ));
         }
         Err(e) => {
             app.set_error(format!("Failed to load memory: {}", e));
             app.memory_regions.clear();
             app.dump_output.clear();
+            app.total_memory_size = 0;
         }
     }
     Ok(())
@@ -978,4 +987,37 @@ fn format_hex_dump(_addr: u64, data: &str) -> String {
     }
 
     result
+}
+
+fn create_checkpoint(app: &mut App, proc: models::process::ProcessInfo) -> Result<()> {
+    let checkpoint_path = PathBuf::from(&app.checkpoint_dir).join(format!(
+        "ckpt_{}_{}",
+        proc.pid,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    ));
+
+    app.set_status(format!("Creating checkpoint for PID {}...", proc.pid));
+
+    let runner = wrapper::CkptminiRunner::new(PathBuf::from(&app.ckptmini_path));
+    match runner.save(proc.pid, &checkpoint_path) {
+        Ok(_) => {
+            let meta = serde_json::json!({
+                "pid": proc.pid,
+                "command": proc.name,
+            });
+            let _ = std::fs::write(
+                checkpoint_path.join("meta.json"),
+                serde_json::to_string_pretty(&meta).unwrap_or_default(),
+            );
+            app.set_status(format!("Checkpoint saved to {:?}", checkpoint_path));
+            refresh_checkpoints(app)?;
+        }
+        Err(e) => {
+            app.set_error(format!("Checkpoint failed: {}", e));
+        }
+    }
+    Ok(())
 }
