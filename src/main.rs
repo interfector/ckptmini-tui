@@ -171,6 +171,12 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> Result<()> {
         KeyCode::BackTab => {
             app.prev_tab();
         }
+        KeyCode::Char('n') | KeyCode::Char('N') if app.show_confirm => {
+            app.show_confirm = false;
+            app.confirm_message.clear();
+            app.pending_hex_load = None;
+            app.set_status("Checkpoint cancelled".to_string());
+        }
         KeyCode::Char(' ') => {
             if app.is_searching {
                 app.search_query.push(' ');
@@ -196,7 +202,12 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> Result<()> {
             app.show_help = !app.show_help;
         }
         KeyCode::Esc => {
-            if app.is_searching {
+            if app.extended_mode {
+                app.extended_mode = false;
+                app.extended_command.clear();
+                app.extended_command_type.clear();
+                app.clear_status();
+            } else if app.is_searching {
                 let current_tab = app.tab;
                 app.clear_saved_search();
                 app.is_searching = false;
@@ -251,6 +262,86 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> Result<()> {
         KeyCode::Enter if app.is_hex_searching => {
             app.is_hex_searching = false;
             app.clear_status();
+        }
+        KeyCode::Enter if app.extended_mode => {
+            let cmd_type = app.extended_command_type.clone();
+            if let Some(proc) = app.selected_process() {
+                match cmd_type.as_str() {
+                    "resolve" => {
+                        let symbol = app.extended_command.trim().to_string();
+                        if !symbol.is_empty() {
+                            let pid = proc.pid;
+                            let runner =
+                                wrapper::CkptminiRunner::new(PathBuf::from(&app.ckptmini_path));
+                            match runner.resolve(pid, &symbol) {
+                                Ok(result) => {
+                                    let addr = result
+                                        .lines()
+                                        .find_map(|line| {
+                                            if line.contains("Resolved") && line.contains("->") {
+                                                line.split("->")
+                                                    .nth(1)
+                                                    .map(|s| s.trim().to_string())
+                                            } else {
+                                                None
+                                            }
+                                        })
+                                        .unwrap_or_else(|| "see output".to_string());
+                                    app.dump_output = result;
+                                    app.set_status(format!("Resolved {} to: {}", symbol, addr));
+                                }
+                                Err(e) => {
+                                    app.set_error(format!("Resolve failed: {}", e));
+                                }
+                            }
+                        }
+                    }
+                    "inject_shellcode" => {
+                        let shellcode = app.extended_command.trim().to_string();
+                        if !shellcode.is_empty() {
+                            let pid = proc.pid;
+                            app.set_status(format!("Injecting shellcode to PID {}", pid));
+                            let runner =
+                                wrapper::CkptminiRunner::new(PathBuf::from(&app.ckptmini_path));
+                            match runner.inject_shellcode(pid, &shellcode) {
+                                Ok(result) => {
+                                    app.dump_output = result;
+                                    app.set_status(format!("Shellcode injected to PID {}", pid));
+                                }
+                                Err(e) => {
+                                    app.set_error(format!("Inject failed: {}", e));
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            app.extended_mode = false;
+            app.extended_command.clear();
+            app.extended_command_type.clear();
+        }
+        KeyCode::Char(c) if app.extended_mode => {
+            app.extended_command.push(c);
+            let prompt = match app.extended_command_type.as_str() {
+                "resolve" => "Extended command (resolve <symbol>): ",
+                "inject_shellcode" => "Shellcode (hex, e.g., 90cc): ",
+                _ => "Extended command: ",
+            };
+            app.set_status(format!("{}{}", prompt, app.extended_command));
+        }
+        KeyCode::Backspace if app.extended_mode => {
+            app.extended_command.pop();
+            let prompt = match app.extended_command_type.as_str() {
+                "resolve" => "Extended command (resolve <symbol>): ",
+                "inject_shellcode" => "Shellcode (hex, e.g., 90cc): ",
+                _ => "Extended command: ",
+            };
+            if app.extended_command.is_empty() {
+                app.set_status(prompt.to_string());
+            } else {
+                app.set_status(format!("{}{}", prompt, app.extended_command));
+            }
         }
         KeyCode::Backspace if app.is_searching => {
             if app.search_query.is_empty() {
@@ -351,36 +442,35 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> Result<()> {
         }
         KeyCode::Char('c') => {
             if let Some(proc) = app.selected_process().cloned() {
-                let checkpoint_path = PathBuf::from(&app.checkpoint_dir).join(format!(
-                    "ckpt_{}_{}",
-                    proc.pid,
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs()
-                ));
-
-                app.set_status(format!("Creating checkpoint for PID {}...", proc.pid));
-
-                let runner = wrapper::CkptminiRunner::new(PathBuf::from(&app.ckptmini_path));
-                match runner.save(proc.pid, &checkpoint_path) {
-                    Ok(_) => {
-                        let meta = serde_json::json!({
-                            "pid": proc.pid,
-                            "command": proc.name,
-                        });
-                        let _ = std::fs::write(
-                            checkpoint_path.join("meta.json"),
-                            serde_json::to_string_pretty(&meta).unwrap_or_default(),
-                        );
-                        app.set_status(format!("Checkpoint saved to {:?}", checkpoint_path));
-                        refresh_checkpoints(app)?;
-                    }
-                    Err(e) => {
-                        app.set_error(format!("Checkpoint failed: {}", e));
-                    }
+                const GB: u64 = 1024 * 1024 * 1024;
+                if app.total_memory_size > GB {
+                    app.pending_hex_load = Some((proc.pid as u64, 0));
+                    app.show_confirm = true;
+                    app.confirm_message = format!(
+                        "Total memory is {:.1} GB. Create checkpoint? [y/n]",
+                        app.total_memory_size as f64 / GB as f64
+                    );
+                    app.set_status(app.confirm_message.clone());
+                } else {
+                    create_checkpoint(app, proc)?;
                 }
             }
+        }
+        KeyCode::Char('y') | KeyCode::Char('Y') if app.show_confirm => {
+            if let Some((pid, 0)) = app.pending_hex_load {
+                if let Some(proc) = app.processes.iter().find(|p| p.pid as u64 == pid).cloned() {
+                    create_checkpoint(app, proc)?;
+                }
+            }
+            app.show_confirm = false;
+            app.confirm_message.clear();
+            app.pending_hex_load = None;
+        }
+        KeyCode::Char('n') if app.show_confirm => {
+            app.show_confirm = false;
+            app.confirm_message.clear();
+            app.pending_hex_load = None;
+            app.set_status("Checkpoint cancelled".to_string());
         }
         KeyCode::Char('u') => {
             if matches!(app.tab, Tab::Checkpoints) {
@@ -418,6 +508,45 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> Result<()> {
                     }
                 }
             }
+        }
+        KeyCode::Char('p') => {
+            if matches!(app.tab, Tab::Checkpoints) {
+                if let Some(ckpt) = app.selected_checkpoint().cloned() {
+                    if ckpt.pid > 0 {
+                        let path = ckpt.path.clone();
+                        app.set_status(format!("Parasite restore to PID {}", ckpt.pid));
+                        let runner =
+                            wrapper::CkptminiRunner::new(PathBuf::from(&app.ckptmini_path));
+                        match runner.parasite(ckpt.pid, &path) {
+                            Ok(_) => {
+                                app.set_status(format!(
+                                    "Parasite restore done for PID {}",
+                                    ckpt.pid
+                                ));
+                            }
+                            Err(e) => {
+                                app.set_error(format!("Parasite failed: {}", e));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        KeyCode::Char('i') => {
+            if matches!(app.tab, Tab::Processes) {
+                if app.selected_process().is_some() {
+                    app.extended_mode = true;
+                    app.extended_command.clear();
+                    app.extended_command_type = "inject_shellcode".to_string();
+                    app.set_status("Shellcode (hex, e.g., 90cc): ".to_string());
+                }
+            }
+        }
+        KeyCode::Char('x') => {
+            app.extended_mode = true;
+            app.extended_command.clear();
+            app.extended_command_type = "resolve".to_string();
+            app.set_status("Extended command (resolve <symbol>): ".to_string());
         }
         KeyCode::Char('v') => {
             if matches!(app.tab, Tab::Memory) {
@@ -901,15 +1030,19 @@ fn load_memory_regions(app: &mut App, pid: u32) -> Result<()> {
         Ok(output) => {
             app.dump_output = output.clone();
             app.memory_regions = wrapper::parser::parse_memory_regions(&output);
+            app.total_memory_size = app.memory_regions.iter().map(|r| r.end - r.start).sum();
+            let total_mb = app.total_memory_size / (1024 * 1024);
             app.set_status(format!(
-                "Loaded {} memory regions",
-                app.memory_regions.len()
+                "Loaded {} memory regions ({:.1} MB)",
+                app.memory_regions.len(),
+                total_mb
             ));
         }
         Err(e) => {
             app.set_error(format!("Failed to load memory: {}", e));
             app.memory_regions.clear();
             app.dump_output.clear();
+            app.total_memory_size = 0;
         }
     }
     Ok(())
@@ -978,4 +1111,37 @@ fn format_hex_dump(_addr: u64, data: &str) -> String {
     }
 
     result
+}
+
+fn create_checkpoint(app: &mut App, proc: models::process::ProcessInfo) -> Result<()> {
+    let checkpoint_path = PathBuf::from(&app.checkpoint_dir).join(format!(
+        "ckpt_{}_{}",
+        proc.pid,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    ));
+
+    app.set_status(format!("Creating checkpoint for PID {}...", proc.pid));
+
+    let runner = wrapper::CkptminiRunner::new(PathBuf::from(&app.ckptmini_path));
+    match runner.save(proc.pid, &checkpoint_path) {
+        Ok(_) => {
+            let meta = serde_json::json!({
+                "pid": proc.pid,
+                "command": proc.name,
+            });
+            let _ = std::fs::write(
+                checkpoint_path.join("meta.json"),
+                serde_json::to_string_pretty(&meta).unwrap_or_default(),
+            );
+            app.set_status(format!("Checkpoint saved to {:?}", checkpoint_path));
+            refresh_checkpoints(app)?;
+        }
+        Err(e) => {
+            app.set_error(format!("Checkpoint failed: {}", e));
+        }
+    }
+    Ok(())
 }

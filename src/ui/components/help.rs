@@ -127,12 +127,26 @@ pub fn render_help(f: &mut Frame, area: Rect) {
             Span::raw(" Restore checkpoint"),
         ]),
         Line::from(vec![
+            Span::styled("  p ", key_style),
+            Span::raw(" Parasite restore"),
+        ]),
+        Line::from(vec![
             Span::styled("  d ", key_style),
             Span::raw(" Delete checkpoint"),
         ]),
         Line::from(vec![
             Span::styled("  / ", key_style),
             Span::raw(" Filter checkpoints"),
+        ]),
+        Line::from(vec![Span::raw("")]),
+        Line::from(vec![Span::styled("Advanced", header_style)]),
+        Line::from(vec![
+            Span::styled("  i ", key_style),
+            Span::raw(" Inject shellcode (Processes)"),
+        ]),
+        Line::from(vec![
+            Span::styled("  x ", key_style),
+            Span::raw(" Resolve symbol (Processes)"),
         ]),
     ];
 

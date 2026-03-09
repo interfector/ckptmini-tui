@@ -575,9 +575,9 @@ fn render_output(f: &mut Frame, app: &App, area: Rect) {
                 f.render_widget(
                     thumb,
                     Rect::new(
-                        sb_area.x,
+                        sb_area.x + 2,
                         inner.y + scroll_pos,
-                        sb_area.x + 1,
+                        sb_area.x + 2,
                         inner.y + scroll_pos + 1,
                     ),
                 );
@@ -611,9 +611,9 @@ fn render_output(f: &mut Frame, app: &App, area: Rect) {
                 f.render_widget(
                     thumb,
                     Rect::new(
-                        sb_area.x,
+                        sb_area.x + 2,
                         inner.y + scroll_pos,
-                        sb_area.x + 1,
+                        sb_area.x + 2,
                         inner.y + scroll_pos + 1,
                     ),
                 );
@@ -717,31 +717,18 @@ fn render_scrollbar(f: &mut Frame, area: Rect, total_items: usize, scroll_pos: u
     let visible_height = area.height as usize;
     if total_items > visible_height {
         let scroll_pos = (scroll_pos as f64 / total_items as f64 * visible_height as f64) as u16;
-        let block = Block::bordered()
-            .title("")
-            .borders(ratatui::widgets::Borders::RIGHT)
-            .border_style(Style::default().fg(ACCENT_DIM));
-        let sb_area = Rect::new(
-            area.x + area.width - 1,
-            area.y,
-            area.x + area.width,
-            area.y + area.height,
+        let thumb = Paragraph::new("█")
+            .style(Style::default().fg(ACCENT))
+            .alignment(Alignment::Center);
+        f.render_widget(
+            thumb,
+            Rect::new(
+                area.x + area.width - 1,
+                area.y + scroll_pos,
+                area.x + area.width,
+                area.y + scroll_pos + 1,
+            ),
         );
-        f.render_widget(block, sb_area);
-        if scroll_pos < area.height {
-            let thumb = Paragraph::new("█")
-                .style(Style::default().fg(ACCENT))
-                .alignment(Alignment::Center);
-            f.render_widget(
-                thumb,
-                Rect::new(
-                    sb_area.x,
-                    area.y + scroll_pos,
-                    sb_area.x + 1,
-                    area.y + scroll_pos + 1,
-                ),
-            );
-        }
     }
 }
 

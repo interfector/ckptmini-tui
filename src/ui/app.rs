@@ -65,11 +65,18 @@ pub struct App {
     pub is_hex_searching: bool,
     pub dump_output: String,
     pub output_scroll: usize,
+    pub total_memory_size: u64,
+    pub pending_hex_load: Option<(u64, u64)>,
+    pub show_confirm: bool,
+    pub confirm_message: String,
     pub process_info: String,
     pub process_info_scroll: usize,
     pub output_log: Vec<String>,
     pub input_mode: bool,
     pub input_buffer: String,
+    pub extended_mode: bool,
+    pub extended_command: String,
+    pub extended_command_type: String,
 }
 
 impl App {
@@ -102,11 +109,18 @@ impl App {
             is_hex_searching: false,
             dump_output: String::new(),
             output_scroll: 0,
+            total_memory_size: 0,
+            pending_hex_load: None,
+            show_confirm: false,
+            confirm_message: String::new(),
             process_info: String::new(),
             process_info_scroll: 0,
             output_log: Vec::new(),
             input_mode: false,
             input_buffer: String::new(),
+            extended_mode: false,
+            extended_command: String::new(),
+            extended_command_type: String::new(),
         }
     }
 
