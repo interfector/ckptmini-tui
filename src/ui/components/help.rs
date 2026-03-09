@@ -30,12 +30,22 @@ pub fn render_help(f: &mut Frame, area: Rect) {
             Span::raw(" Switch tab"),
         ]),
         Line::from(vec![
+            Span::styled("  Space ", key_style),
+            Span::raw(" Toggle focus (list/output)"),
+        ]),
+        Line::from(vec![
             Span::styled("  r ", key_style),
             Span::raw(" Refresh list"),
         ]),
+        Line::from(vec![Span::raw("")]),
+        Line::from(vec![Span::styled("Search & Filter", header_style)]),
         Line::from(vec![
             Span::styled("  / ", key_style),
-            Span::raw(" Search processes"),
+            Span::raw(" Search/filter (tab-specific)"),
+        ]),
+        Line::from(vec![
+            Span::styled("  Esc ", key_style),
+            Span::raw(" Cancel search/close view"),
         ]),
         Line::from(vec![Span::raw("")]),
         Line::from(vec![Span::styled("Sorting (Processes)", header_style)]),
@@ -46,10 +56,10 @@ pub fn render_help(f: &mut Frame, area: Rect) {
         Line::from(vec![Span::styled("  P ", key_style), Span::raw(" By PID")]),
         Line::from(vec![Span::styled("  N ", key_style), Span::raw(" By name")]),
         Line::from(vec![Span::raw("")]),
-        Line::from(vec![Span::styled("Navigation", header_style)]),
+        Line::from(vec![Span::styled("List Navigation", header_style)]),
         Line::from(vec![
             Span::styled("  ↑/↓ or j/k ", key_style),
-            Span::raw(" Navigate"),
+            Span::raw(" Navigate up/down"),
         ]),
         Line::from(vec![
             Span::styled("  PgUp/PgDn ", key_style),
@@ -58,6 +68,23 @@ pub fn render_help(f: &mut Frame, area: Rect) {
         Line::from(vec![
             Span::styled("  Home/End ", key_style),
             Span::raw(" First/last"),
+        ]),
+        Line::from(vec![Span::raw("")]),
+        Line::from(vec![Span::styled(
+            "Output Navigation (when focused)",
+            header_style,
+        )]),
+        Line::from(vec![
+            Span::styled("  ↑/↓ or j/k ", key_style),
+            Span::raw(" Scroll content"),
+        ]),
+        Line::from(vec![
+            Span::styled("  PgUp/PgDn ", key_style),
+            Span::raw(" Page through content"),
+        ]),
+        Line::from(vec![
+            Span::styled("  Home/End ", key_style),
+            Span::raw(" Jump to start/end"),
         ]),
         Line::from(vec![Span::raw("")]),
         Line::from(vec![Span::styled("Processes Tab", header_style)]),
@@ -76,8 +103,22 @@ pub fn render_help(f: &mut Frame, area: Rect) {
             Span::raw(" View hex dump"),
         ]),
         Line::from(vec![
+            Span::styled("  / ", key_style),
+            Span::raw(" Filter regions"),
+        ]),
+        Line::from(vec![
             Span::styled("  Esc ", key_style),
-            Span::raw(" Back to list"),
+            Span::raw(" Back to regions"),
+        ]),
+        Line::from(vec![Span::raw("")]),
+        Line::from(vec![Span::styled("Hex Dump View", header_style)]),
+        Line::from(vec![
+            Span::styled("  / ", key_style),
+            Span::raw(" Search in hex"),
+        ]),
+        Line::from(vec![
+            Span::styled("  Esc ", key_style),
+            Span::raw(" Close hex view"),
         ]),
         Line::from(vec![Span::raw("")]),
         Line::from(vec![Span::styled("Checkpoints Tab", header_style)]),
@@ -88,6 +129,10 @@ pub fn render_help(f: &mut Frame, area: Rect) {
         Line::from(vec![
             Span::styled("  d ", key_style),
             Span::raw(" Delete checkpoint"),
+        ]),
+        Line::from(vec![
+            Span::styled("  / ", key_style),
+            Span::raw(" Filter checkpoints"),
         ]),
     ];
 

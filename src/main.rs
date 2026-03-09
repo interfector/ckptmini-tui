@@ -182,10 +182,20 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> Result<()> {
             app.show_help = !app.show_help;
         }
         KeyCode::Esc => {
-            if app.is_searching && matches!(app.tab, Tab::Processes) {
+            if app.is_searching {
                 app.is_searching = false;
                 app.search_query.clear();
-                let _ = refresh_processes(app);
+                if matches!(app.tab, Tab::Processes) {
+                    let _ = refresh_processes(app);
+                } else if matches!(app.tab, Tab::Memory) {
+                    app.memory_scroll = 0;
+                    if let Some(p) = app.selected_process() {
+                        let _ = load_memory_regions(app, p.pid);
+                    }
+                } else if matches!(app.tab, Tab::Checkpoints) {
+                    app.checkpoint_scroll = 0;
+                    refresh_checkpoints(app)?;
+                }
                 app.clear_status();
             } else if app.is_hex_searching {
                 app.is_hex_searching = false;
@@ -200,13 +210,18 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> Result<()> {
             if c == '\n' || c == '\r' {
                 app.is_searching = false;
                 if !app.search_query.is_empty() {
-                    filter_processes_by_search(app);
+                    apply_search_filter(app);
                 }
                 app.clear_status();
             } else {
                 app.search_query.push(c);
-                app.set_status(format!("Search: {}", app.search_query));
-                filter_processes_by_search(app);
+                let prefix = match app.tab {
+                    Tab::Processes => "Search: ",
+                    Tab::Memory => "Filter memory: ",
+                    Tab::Checkpoints => "Filter checkpoints: ",
+                };
+                app.set_status(format!("{}{}", prefix, app.search_query));
+                apply_search_filter(app);
             }
         }
         KeyCode::Char(c) if app.is_hex_searching => {
@@ -221,11 +236,18 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> Result<()> {
         KeyCode::Backspace if app.is_searching => {
             app.search_query.pop();
             if app.search_query.is_empty() {
-                refresh_processes(app)?;
+                if matches!(app.tab, Tab::Processes) {
+                    refresh_processes(app)?;
+                }
                 app.clear_status();
             } else {
-                app.set_status(format!("Search: {}", app.search_query));
-                filter_processes_by_search(app);
+                let prefix = match app.tab {
+                    Tab::Processes => "Search: ",
+                    Tab::Memory => "Filter memory: ",
+                    Tab::Checkpoints => "Filter checkpoints: ",
+                };
+                app.set_status(format!("{}{}", prefix, app.search_query));
+                apply_search_filter(app);
             }
         }
         KeyCode::Backspace if app.is_hex_searching => {
@@ -248,7 +270,12 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> Result<()> {
             } else {
                 app.is_searching = true;
                 app.search_query.clear();
-                app.set_status("Search: ".to_string());
+                let tab_label = match app.tab {
+                    Tab::Processes => "Search: ",
+                    Tab::Memory => "Filter memory: ",
+                    Tab::Checkpoints => "Filter checkpoints: ",
+                };
+                app.set_status(tab_label.to_string());
             }
         }
         KeyCode::Char('M') => {
@@ -381,6 +408,20 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> Result<()> {
                 let visible_height = 20usize;
                 app.output_scroll =
                     (app.output_scroll + 1).min(total_lines.saturating_sub(visible_height));
+            } else if !app.show_hex_view
+                && app.focus == Focus::Output
+                && matches!(app.tab, Tab::Processes)
+                && !app.process_info.is_empty()
+            {
+                let total_lines = app.process_info.lines().count();
+                let visible_height = 20usize;
+                app.process_info_scroll =
+                    (app.process_info_scroll + 1).min(total_lines.saturating_sub(visible_height));
+            } else if !app.show_hex_view
+                && app.focus == Focus::Output
+                && matches!(app.tab, Tab::Checkpoints)
+                && app.selected_checkpoint().is_some()
+            {
             } else {
                 match app.tab {
                     Tab::Processes => {
@@ -452,6 +493,19 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> Result<()> {
                 if app.output_scroll > 0 {
                     app.output_scroll -= 1;
                 }
+            } else if !app.show_hex_view
+                && app.focus == Focus::Output
+                && matches!(app.tab, Tab::Processes)
+                && !app.process_info.is_empty()
+            {
+                if app.process_info_scroll > 0 {
+                    app.process_info_scroll -= 1;
+                }
+            } else if !app.show_hex_view
+                && app.focus == Focus::Output
+                && matches!(app.tab, Tab::Checkpoints)
+                && app.selected_checkpoint().is_some()
+            {
             } else {
                 match app.tab {
                     Tab::Processes => {
@@ -519,6 +573,20 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> Result<()> {
                 let visible_height = 20usize;
                 app.output_scroll = (app.output_scroll + visible_height)
                     .min(total_lines.saturating_sub(visible_height));
+            } else if !app.show_hex_view
+                && app.focus == Focus::Output
+                && matches!(app.tab, Tab::Processes)
+                && !app.process_info.is_empty()
+            {
+                let total_lines = app.process_info.lines().count();
+                let visible_height = 20usize;
+                app.process_info_scroll = (app.process_info_scroll + visible_height)
+                    .min(total_lines.saturating_sub(visible_height));
+            } else if !app.show_hex_view
+                && app.focus == Focus::Output
+                && matches!(app.tab, Tab::Checkpoints)
+                && app.selected_checkpoint().is_some()
+            {
             } else {
                 match app.tab {
                     Tab::Processes => {
@@ -567,6 +635,18 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> Result<()> {
             {
                 let visible_height = 20usize;
                 app.output_scroll = app.output_scroll.saturating_sub(visible_height);
+            } else if !app.show_hex_view
+                && app.focus == Focus::Output
+                && matches!(app.tab, Tab::Processes)
+                && !app.process_info.is_empty()
+            {
+                let visible_height = 20usize;
+                app.process_info_scroll = app.process_info_scroll.saturating_sub(visible_height);
+            } else if !app.show_hex_view
+                && app.focus == Focus::Output
+                && matches!(app.tab, Tab::Checkpoints)
+                && app.selected_checkpoint().is_some()
+            {
             } else {
                 match app.tab {
                     Tab::Processes => {
@@ -598,6 +678,17 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> Result<()> {
                 && matches!(app.tab, Tab::Memory)
             {
                 app.output_scroll = 0;
+            } else if !app.show_hex_view
+                && app.focus == Focus::Output
+                && matches!(app.tab, Tab::Processes)
+                && !app.process_info.is_empty()
+            {
+                app.process_info_scroll = 0;
+            } else if !app.show_hex_view
+                && app.focus == Focus::Output
+                && matches!(app.tab, Tab::Checkpoints)
+                && app.selected_checkpoint().is_some()
+            {
             } else {
                 match app.tab {
                     Tab::Processes => {
@@ -630,6 +721,19 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> Result<()> {
                 let total_lines = app.dump_output.lines().count();
                 let visible_height = 20usize;
                 app.output_scroll = total_lines.saturating_sub(visible_height);
+            } else if !app.show_hex_view
+                && app.focus == Focus::Output
+                && matches!(app.tab, Tab::Processes)
+                && !app.process_info.is_empty()
+            {
+                let total_lines = app.process_info.lines().count();
+                let visible_height = 20usize;
+                app.process_info_scroll = total_lines.saturating_sub(visible_height);
+            } else if !app.show_hex_view
+                && app.focus == Focus::Output
+                && matches!(app.tab, Tab::Checkpoints)
+                && app.selected_checkpoint().is_some()
+            {
             } else {
                 match app.tab {
                     Tab::Processes => {
@@ -691,6 +795,59 @@ fn filter_processes_by_search(app: &mut App) {
 
     app.process_scroll = 0;
     app.sort_processes();
+}
+
+fn apply_search_filter(app: &mut App) {
+    let query = app.search_query.to_lowercase();
+    if query.is_empty() {
+        return;
+    }
+
+    match app.tab {
+        Tab::Processes => {
+            filter_processes_by_search(app);
+        }
+        Tab::Memory => {
+            if let Some(proc) = app.selected_process() {
+                let runner = wrapper::CkptminiRunner::new(PathBuf::from(&app.ckptmini_path));
+                if let Ok(output) = runner.dump(proc.pid) {
+                    let all_regions = wrapper::parser::parse_memory_regions(&output);
+                    app.memory_regions = all_regions
+                        .into_iter()
+                        .filter(|r| {
+                            let path = r.path.clone().unwrap_or_default();
+                            let addr = format!("{:x}", r.start);
+                            let perms = r.perms.as_string();
+                            path.to_lowercase().contains(&query)
+                                || addr.contains(&query)
+                                || perms.to_lowercase().contains(&query)
+                        })
+                        .collect();
+                    app.memory_scroll = 0;
+                }
+            }
+        }
+        Tab::Checkpoints => {
+            let dir = PathBuf::from(&app.checkpoint_dir);
+            let paths = wrapper::parser::list_checkpoints(&dir);
+            let all_checkpoints: Vec<CheckpointInfo> = paths
+                .iter()
+                .filter_map(|p| CheckpointInfo::from_dir(p))
+                .collect();
+            app.checkpoints = all_checkpoints
+                .into_iter()
+                .filter(|c| {
+                    let name = c
+                        .path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_lowercase())
+                        .unwrap_or_default();
+                    name.contains(&query)
+                })
+                .collect();
+            app.checkpoint_scroll = 0;
+        }
+    }
 }
 
 fn load_process_info(app: &mut App, pid: u32) -> Result<()> {

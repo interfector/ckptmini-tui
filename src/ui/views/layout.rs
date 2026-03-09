@@ -497,9 +497,11 @@ fn render_output(f: &mut Frame, app: &App, area: Rect) {
     } else if matches!(app.tab, Tab::Memory) {
         vec![Line::from(" Select a memory region to view details")]
     } else if matches!(app.tab, Tab::Processes) && !app.process_info.is_empty() {
+        let visible_height = inner.height as usize;
         app.process_info
             .lines()
-            .take(MAX_LINES)
+            .skip(app.process_info_scroll)
+            .take(visible_height)
             .map(|l| {
                 if l.starts_with("  ") {
                     Line::from(l).style(Style::default().fg(PURPLE))
