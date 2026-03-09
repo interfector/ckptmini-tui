@@ -96,3 +96,7 @@ ckptmini-tui
 ## License
 
 MIT
+
+---
+
+*This program was generated entirely using AI.*

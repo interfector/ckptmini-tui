@@ -74,6 +74,8 @@ pub struct App {
     pub output_log: Vec<String>,
     pub input_mode: bool,
     pub input_buffer: String,
+    pub extended_mode: bool,
+    pub extended_command: String,
 }
 
 impl App {
@@ -115,6 +117,8 @@ impl App {
             output_log: Vec::new(),
             input_mode: false,
             input_buffer: String::new(),
+            extended_mode: false,
+            extended_command: String::new(),
         }
     }
 
