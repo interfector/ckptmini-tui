@@ -87,6 +87,13 @@ impl CkptminiRunner {
             .output()
             .context("Failed to run ckptmini resolve")?;
 
+        if !output.status.success() {
+            anyhow::bail!(
+                "ckptmini resolve failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
 
@@ -108,10 +115,11 @@ impl CkptminiRunner {
         Ok(())
     }
 
-    pub fn inject_shellcode(&self, pid: u32) -> Result<()> {
+    pub fn inject_shellcode(&self, pid: u32, shellcode: &str) -> Result<String> {
         let output = Command::new(&self.binary_path)
             .arg("inject_shellcode")
             .arg(pid.to_string())
+            .arg(shellcode)
             .output()
             .context("Failed to run ckptmini inject_shellcode")?;
 
@@ -122,6 +130,6 @@ impl CkptminiRunner {
             );
         }
 
-        Ok(())
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
 }

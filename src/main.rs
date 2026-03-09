@@ -205,6 +205,7 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> Result<()> {
             if app.extended_mode {
                 app.extended_mode = false;
                 app.extended_command.clear();
+                app.extended_command_type.clear();
                 app.clear_status();
             } else if app.is_searching {
                 let current_tab = app.tab;
@@ -263,40 +264,83 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> Result<()> {
             app.clear_status();
         }
         KeyCode::Enter if app.extended_mode => {
+            let cmd_type = app.extended_command_type.clone();
             if let Some(proc) = app.selected_process() {
-                let symbol = app.extended_command.trim();
-                if !symbol.is_empty() {
-                    let runner = wrapper::CkptminiRunner::new(PathBuf::from(&app.ckptmini_path));
-                    match runner.resolve(proc.pid, symbol) {
-                        Ok(result) => {
-                            app.dump_output = result;
-                            app.set_status(format!("Resolved {} to: ", symbol));
-                        }
-                        Err(e) => {
-                            app.set_error(format!("Resolve failed: {}", e));
+                match cmd_type.as_str() {
+                    "resolve" => {
+                        let symbol = app.extended_command.trim().to_string();
+                        if !symbol.is_empty() {
+                            let pid = proc.pid;
+                            let runner =
+                                wrapper::CkptminiRunner::new(PathBuf::from(&app.ckptmini_path));
+                            match runner.resolve(pid, &symbol) {
+                                Ok(result) => {
+                                    let addr = result
+                                        .lines()
+                                        .find_map(|line| {
+                                            if line.contains("Resolved") && line.contains("->") {
+                                                line.split("->")
+                                                    .nth(1)
+                                                    .map(|s| s.trim().to_string())
+                                            } else {
+                                                None
+                                            }
+                                        })
+                                        .unwrap_or_else(|| "see output".to_string());
+                                    app.dump_output = result;
+                                    app.set_status(format!("Resolved {} to: {}", symbol, addr));
+                                }
+                                Err(e) => {
+                                    app.set_error(format!("Resolve failed: {}", e));
+                                }
+                            }
                         }
                     }
+                    "inject_shellcode" => {
+                        let shellcode = app.extended_command.trim().to_string();
+                        if !shellcode.is_empty() {
+                            let pid = proc.pid;
+                            app.set_status(format!("Injecting shellcode to PID {}", pid));
+                            let runner =
+                                wrapper::CkptminiRunner::new(PathBuf::from(&app.ckptmini_path));
+                            match runner.inject_shellcode(pid, &shellcode) {
+                                Ok(result) => {
+                                    app.dump_output = result;
+                                    app.set_status(format!("Shellcode injected to PID {}", pid));
+                                }
+                                Err(e) => {
+                                    app.set_error(format!("Inject failed: {}", e));
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
             app.extended_mode = false;
             app.extended_command.clear();
+            app.extended_command_type.clear();
         }
         KeyCode::Char(c) if app.extended_mode => {
             app.extended_command.push(c);
-            app.set_status(format!(
-                "Extended command (resolve <symbol>): {}",
-                app.extended_command
-            ));
+            let prompt = match app.extended_command_type.as_str() {
+                "resolve" => "Extended command (resolve <symbol>): ",
+                "inject_shellcode" => "Shellcode (hex, e.g., 90cc): ",
+                _ => "Extended command: ",
+            };
+            app.set_status(format!("{}{}", prompt, app.extended_command));
         }
         KeyCode::Backspace if app.extended_mode => {
             app.extended_command.pop();
+            let prompt = match app.extended_command_type.as_str() {
+                "resolve" => "Extended command (resolve <symbol>): ",
+                "inject_shellcode" => "Shellcode (hex, e.g., 90cc): ",
+                _ => "Extended command: ",
+            };
             if app.extended_command.is_empty() {
-                app.set_status("Extended command (resolve <symbol>): ".to_string());
+                app.set_status(prompt.to_string());
             } else {
-                app.set_status(format!(
-                    "Extended command (resolve <symbol>): {}",
-                    app.extended_command
-                ));
+                app.set_status(format!("{}{}", prompt, app.extended_command));
             }
         }
         KeyCode::Backspace if app.is_searching => {
@@ -490,22 +534,18 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> Result<()> {
         }
         KeyCode::Char('i') => {
             if matches!(app.tab, Tab::Processes) {
-                if let Some(proc) = app.selected_process().cloned() {
-                    app.set_status(format!("Injecting shellcode to PID {}", proc.pid));
-                    let runner = wrapper::CkptminiRunner::new(PathBuf::from(&app.ckptmini_path));
-                    match runner.inject_shellcode(proc.pid) {
-                        Ok(_) => {
-                            app.set_status(format!("Shellcode injected to PID {}", proc.pid));
-                        }
-                        Err(e) => {
-                            app.set_error(format!("Inject failed: {}", e));
-                        }
-                    }
+                if app.selected_process().is_some() {
+                    app.extended_mode = true;
+                    app.extended_command.clear();
+                    app.extended_command_type = "inject_shellcode".to_string();
+                    app.set_status("Shellcode (hex, e.g., 90cc): ".to_string());
                 }
             }
         }
         KeyCode::Char('x') => {
             app.extended_mode = true;
+            app.extended_command.clear();
+            app.extended_command_type = "resolve".to_string();
             app.set_status("Extended command (resolve <symbol>): ".to_string());
         }
         KeyCode::Char('v') => {

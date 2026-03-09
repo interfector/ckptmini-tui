@@ -76,6 +76,7 @@ pub struct App {
     pub input_buffer: String,
     pub extended_mode: bool,
     pub extended_command: String,
+    pub extended_command_type: String,
 }
 
 impl App {
@@ -119,6 +120,7 @@ impl App {
             input_buffer: String::new(),
             extended_mode: false,
             extended_command: String::new(),
+            extended_command_type: String::new(),
         }
     }
 
