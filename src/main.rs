@@ -172,11 +172,25 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> Result<()> {
             app.prev_tab();
         }
         KeyCode::Char(' ') => {
-            app.focus = match app.focus {
-                Focus::List => Focus::Output,
-                Focus::Output => Focus::List,
-            };
-            app.set_status(format!("Focus: {:?}", app.focus));
+            if app.is_searching {
+                app.search_query.push(' ');
+                let prefix = match app.tab {
+                    Tab::Processes => "Search: ",
+                    Tab::Memory => "Filter memory: ",
+                    Tab::Checkpoints => "Filter checkpoints: ",
+                };
+                app.set_status(format!("{}{}", prefix, app.search_query));
+                apply_search_filter(app);
+            } else if app.is_hex_searching {
+                app.hex_search.push(' ');
+                app.set_status(format!("Hex search: {}", app.hex_search));
+            } else {
+                app.focus = match app.focus {
+                    Focus::List => Focus::Output,
+                    Focus::Output => Focus::List,
+                };
+                app.set_status(format!("Focus: {:?}", app.focus));
+            }
         }
         KeyCode::Char('?') => {
             app.show_help = !app.show_help;
@@ -184,11 +198,11 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> Result<()> {
         KeyCode::Esc => {
             if app.is_searching {
                 let current_tab = app.tab;
+                app.clear_saved_search();
                 app.is_searching = false;
                 app.search_query.clear();
                 match current_tab {
                     Tab::Processes => {
-                        app.process_search.clear();
                         let _ = refresh_processes(app);
                     }
                     Tab::Memory => {
@@ -213,40 +227,49 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> Result<()> {
             }
         }
         KeyCode::Char(c) if app.is_searching => {
-            if c == '\n' || c == '\r' {
-                app.is_searching = false;
-                if !app.search_query.is_empty() {
-                    apply_search_filter(app);
-                }
-                app.clear_status();
-            } else {
-                app.search_query.push(c);
-                let prefix = match app.tab {
-                    Tab::Processes => "Search: ",
-                    Tab::Memory => "Filter memory: ",
-                    Tab::Checkpoints => "Filter checkpoints: ",
-                };
-                app.set_status(format!("{}{}", prefix, app.search_query));
+            app.search_query.push(c);
+            let prefix = match app.tab {
+                Tab::Processes => "Search: ",
+                Tab::Memory => "Filter memory: ",
+                Tab::Checkpoints => "Filter checkpoints: ",
+            };
+            app.set_status(format!("{}{}", prefix, app.search_query));
+            apply_search_filter(app);
+        }
+        KeyCode::Enter if app.is_searching => {
+            app.is_searching = false;
+            if !app.search_query.is_empty() {
+                app.save_current_search();
                 apply_search_filter(app);
             }
+            app.clear_status();
         }
         KeyCode::Char(c) if app.is_hex_searching => {
-            if c == '\n' || c == '\r' {
-                app.is_hex_searching = false;
-                app.clear_status();
-            } else {
-                app.hex_search.push(c);
-                app.set_status(format!("Hex search: {}", app.hex_search));
-            }
+            app.hex_search.push(c);
+            app.set_status(format!("Hex search: {}", app.hex_search));
+        }
+        KeyCode::Enter if app.is_hex_searching => {
+            app.is_hex_searching = false;
+            app.clear_status();
         }
         KeyCode::Backspace if app.is_searching => {
-            app.search_query.pop();
             if app.search_query.is_empty() {
+                app.is_searching = false;
+                app.clear_saved_search();
                 if matches!(app.tab, Tab::Processes) {
                     refresh_processes(app)?;
+                } else if matches!(app.tab, Tab::Memory) {
+                    app.memory_scroll = 0;
+                    if let Some(p) = app.selected_process() {
+                        let _ = load_memory_regions(app, p.pid);
+                    }
+                } else if matches!(app.tab, Tab::Checkpoints) {
+                    app.checkpoint_scroll = 0;
+                    refresh_checkpoints(app)?;
                 }
                 app.clear_status();
             } else {
+                app.search_query.pop();
                 let prefix = match app.tab {
                     Tab::Processes => "Search: ",
                     Tab::Memory => "Filter memory: ",
@@ -274,6 +297,9 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> Result<()> {
                 app.hex_search.clear();
                 app.set_status("Hex search: ".to_string());
             } else {
+                if app.is_searching {
+                    app.save_current_search();
+                }
                 app.is_searching = true;
                 app.search_query.clear();
                 let tab_label = match app.tab {

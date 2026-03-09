@@ -179,7 +179,6 @@ impl App {
     pub fn next_tab(&mut self) {
         if self.is_searching {
             self.save_current_search();
-            self.is_searching = false;
         }
         self.tab = match self.tab {
             Tab::Processes => Tab::Memory,
@@ -193,7 +192,6 @@ impl App {
     pub fn prev_tab(&mut self) {
         if self.is_searching {
             self.save_current_search();
-            self.is_searching = false;
         }
         self.tab = match self.tab {
             Tab::Processes => Tab::Checkpoints,
@@ -213,28 +211,50 @@ impl App {
             }
         }
         self.search_query.clear();
+        self.is_searching = false;
     }
 
     pub fn restore_search_for_tab(&mut self) {
-        match self.tab {
+        let has_saved = match self.tab {
             Tab::Processes => {
                 if !self.process_search.is_empty() {
                     self.search_query = self.process_search.clone();
                     self.is_searching = true;
+                    true
+                } else {
+                    false
                 }
             }
             Tab::Memory => {
                 if !self.memory_search.is_empty() {
                     self.search_query = self.memory_search.clone();
                     self.is_searching = true;
+                    true
+                } else {
+                    false
                 }
             }
             Tab::Checkpoints => {
                 if !self.checkpoint_search.is_empty() {
                     self.search_query = self.checkpoint_search.clone();
                     self.is_searching = true;
+                    true
+                } else {
+                    false
                 }
             }
+        };
+        if !has_saved {
+            self.is_searching = false;
+            self.search_query.clear();
+        }
+    }
+
+    pub fn clear_saved_search(&mut self) {
+        match self.tab {
+            Tab::Processes => self.process_search.clear(),
+            Tab::Memory => self.memory_search.clear(),
+            Tab::Checkpoints => self.checkpoint_search.clear(),
         }
     }
 }

@@ -177,6 +177,8 @@ fn render_process_list(f: &mut Frame, app: &App, area: Rect) {
         Constraint::Length(8),
     ]);
     f.render_widget(table, inner);
+
+    render_scrollbar(f, inner, app.processes.len(), app.process_scroll);
 }
 
 fn render_memory_list(f: &mut Frame, app: &App, area: Rect) {
@@ -275,6 +277,8 @@ fn render_memory_list(f: &mut Frame, app: &App, area: Rect) {
         Constraint::Length(24),
     ]);
     f.render_widget(table, inner);
+
+    render_scrollbar(f, inner, app.memory_regions.len(), app.memory_scroll);
 }
 
 fn render_checkpoint_list(f: &mut Frame, app: &App, area: Rect) {
@@ -367,6 +371,8 @@ fn render_checkpoint_list(f: &mut Frame, app: &App, area: Rect) {
         Constraint::Length(10),
     ]);
     f.render_widget(table, inner);
+
+    render_scrollbar(f, inner, app.checkpoints.len(), app.checkpoint_scroll);
 }
 
 fn render_output(f: &mut Frame, app: &App, area: Rect) {
@@ -404,16 +410,14 @@ fn render_output(f: &mut Frame, app: &App, area: Rect) {
         let visible_height = inner.height as usize;
         let start = app.hex_scroll.min(total_lines.saturating_sub(1));
         let search_lower = app.hex_search.to_lowercase();
+        let has_hex_search = !search_lower.is_empty();
 
         app.hex_data
             .lines()
             .skip(start)
             .take(visible_height)
             .map(|l| {
-                if app.is_hex_searching
-                    && !search_lower.is_empty()
-                    && l.to_lowercase().contains(&search_lower)
-                {
+                if has_hex_search && l.to_lowercase().contains(&search_lower) {
                     Line::from(l)
                         .style(Style::default().fg(PURPLE).add_modifier(Modifier::REVERSED))
                 } else {
@@ -663,17 +667,25 @@ fn render_status(f: &mut Frame, app: &App, area: Rect) {
         .selected_process()
         .map(|p| p.pid.to_string())
         .unwrap_or_else(|| "None".to_string());
-    let mode_tag = match app.focus {
-        Focus::List => "[LIST]",
-        Focus::Output => "[VIEW]",
+
+    let (center_text, center_style) = if let Some(msg) = &app.status_message {
+        let color = if app.status_is_error { ERROR } else { WARNING };
+        (msg.clone(), Style::default().fg(color).bold())
+    } else {
+        let mode_tag = match app.focus {
+            Focus::List => "[LIST]",
+            Focus::Output => "[VIEW]",
+        };
+        (mode_tag.to_string(), Style::default().fg(CYAN).bold())
     };
+
     let help_text = if app.show_help {
         " Press any key "
     } else {
         " ?:help  q:quit  Tab:switch  Space:focus "
     };
     let left = format!(" ⌘ ckptmini {}  PID: {} ", pid_indicator, pid_str);
-    let center = format!(" {} ", mode_tag);
+    let center = format!(" {} ", center_text);
     let help = help_text.to_string();
     let left_len = left.len() as u16;
     let help_len = help.len() as u16;
@@ -688,7 +700,7 @@ fn render_status(f: &mut Frame, app: &App, area: Rect) {
         Rect::new(sep1, area.y, sep1 + 1, area.y + 1),
     );
     f.render_widget(
-        Paragraph::new(center).style(Style::default().fg(CYAN).bold()),
+        Paragraph::new(center).style(center_style),
         Rect::new(sep1 + 1, area.y, sep2, area.y + 1),
     );
     f.render_widget(
@@ -699,6 +711,38 @@ fn render_status(f: &mut Frame, app: &App, area: Rect) {
         Paragraph::new(help).style(Style::default().fg(TEXT_MUTED)),
         Rect::new(sep2 + 1, area.y, area.width, area.y + 1),
     );
+}
+
+fn render_scrollbar(f: &mut Frame, area: Rect, total_items: usize, scroll_pos: usize) {
+    let visible_height = area.height as usize;
+    if total_items > visible_height {
+        let scroll_pos = (scroll_pos as f64 / total_items as f64 * visible_height as f64) as u16;
+        let block = Block::bordered()
+            .title("")
+            .borders(ratatui::widgets::Borders::RIGHT)
+            .border_style(Style::default().fg(ACCENT_DIM));
+        let sb_area = Rect::new(
+            area.x + area.width - 1,
+            area.y,
+            area.x + area.width,
+            area.y + area.height,
+        );
+        f.render_widget(block, sb_area);
+        if scroll_pos < area.height {
+            let thumb = Paragraph::new("█")
+                .style(Style::default().fg(ACCENT))
+                .alignment(Alignment::Center);
+            f.render_widget(
+                thumb,
+                Rect::new(
+                    sb_area.x,
+                    area.y + scroll_pos,
+                    sb_area.x + 1,
+                    area.y + scroll_pos + 1,
+                ),
+            );
+        }
+    }
 }
 
 fn format_size(bytes: u64) -> String {
