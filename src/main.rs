@@ -183,18 +183,24 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> Result<()> {
         }
         KeyCode::Esc => {
             if app.is_searching {
+                let current_tab = app.tab;
                 app.is_searching = false;
                 app.search_query.clear();
-                if matches!(app.tab, Tab::Processes) {
-                    let _ = refresh_processes(app);
-                } else if matches!(app.tab, Tab::Memory) {
-                    app.memory_scroll = 0;
-                    if let Some(p) = app.selected_process() {
-                        let _ = load_memory_regions(app, p.pid);
+                match current_tab {
+                    Tab::Processes => {
+                        app.process_search.clear();
+                        let _ = refresh_processes(app);
                     }
-                } else if matches!(app.tab, Tab::Checkpoints) {
-                    app.checkpoint_scroll = 0;
-                    refresh_checkpoints(app)?;
+                    Tab::Memory => {
+                        app.memory_scroll = 0;
+                        if let Some(p) = app.selected_process() {
+                            let _ = load_memory_regions(app, p.pid);
+                        }
+                    }
+                    Tab::Checkpoints => {
+                        app.checkpoint_scroll = 0;
+                        refresh_checkpoints(app)?;
+                    }
                 }
                 app.clear_status();
             } else if app.is_hex_searching {

@@ -13,7 +13,7 @@ pub enum SortBy {
     Name,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Tab {
     Processes,
     Memory,
@@ -55,6 +55,9 @@ pub struct App {
     pub sort_ascending: bool,
     pub search_query: String,
     pub is_searching: bool,
+    pub process_search: String,
+    pub memory_search: String,
+    pub checkpoint_search: String,
     pub show_hex_view: bool,
     pub hex_data: String,
     pub hex_scroll: usize,
@@ -89,6 +92,9 @@ impl App {
             sort_ascending: false,
             search_query: String::new(),
             is_searching: false,
+            process_search: String::new(),
+            memory_search: String::new(),
+            checkpoint_search: String::new(),
             show_hex_view: false,
             hex_data: String::new(),
             hex_scroll: 0,
@@ -171,20 +177,64 @@ impl App {
     }
 
     pub fn next_tab(&mut self) {
+        if self.is_searching {
+            self.save_current_search();
+            self.is_searching = false;
+        }
         self.tab = match self.tab {
             Tab::Processes => Tab::Memory,
             Tab::Memory => Tab::Checkpoints,
             Tab::Checkpoints => Tab::Processes,
         };
+        self.restore_search_for_tab();
         self.add_output(format!("[mode] Switched to {:?}", self.tab));
     }
 
     pub fn prev_tab(&mut self) {
+        if self.is_searching {
+            self.save_current_search();
+            self.is_searching = false;
+        }
         self.tab = match self.tab {
             Tab::Processes => Tab::Checkpoints,
             Tab::Memory => Tab::Processes,
             Tab::Checkpoints => Tab::Memory,
         };
+        self.restore_search_for_tab();
         self.add_output(format!("[mode] Switched to {:?}", self.tab));
+    }
+
+    pub fn save_current_search(&mut self) {
+        if !self.search_query.is_empty() {
+            match self.tab {
+                Tab::Processes => self.process_search = self.search_query.clone(),
+                Tab::Memory => self.memory_search = self.search_query.clone(),
+                Tab::Checkpoints => self.checkpoint_search = self.search_query.clone(),
+            }
+        }
+        self.search_query.clear();
+    }
+
+    pub fn restore_search_for_tab(&mut self) {
+        match self.tab {
+            Tab::Processes => {
+                if !self.process_search.is_empty() {
+                    self.search_query = self.process_search.clone();
+                    self.is_searching = true;
+                }
+            }
+            Tab::Memory => {
+                if !self.memory_search.is_empty() {
+                    self.search_query = self.memory_search.clone();
+                    self.is_searching = true;
+                }
+            }
+            Tab::Checkpoints => {
+                if !self.checkpoint_search.is_empty() {
+                    self.search_query = self.checkpoint_search.clone();
+                    self.is_searching = true;
+                }
+            }
+        }
     }
 }
