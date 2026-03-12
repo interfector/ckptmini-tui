@@ -77,6 +77,8 @@ pub struct App {
     pub extended_mode: bool,
     pub extended_command: String,
     pub extended_command_type: String,
+    pub pending_write_addr: Option<u64>,
+    pub write_mode: String,
 }
 
 impl App {
@@ -121,6 +123,8 @@ impl App {
             extended_mode: false,
             extended_command: String::new(),
             extended_command_type: String::new(),
+            pending_write_addr: None,
+            write_mode: String::new(),
         }
     }
 

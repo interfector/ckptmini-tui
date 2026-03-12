@@ -111,6 +111,40 @@ pub fn render_help(f: &mut Frame, area: Rect) {
             Span::raw(" Back to regions"),
         ]),
         Line::from(vec![Span::raw("")]),
+        Line::from(vec![Span::styled("Memory Operations", header_style)]),
+        Line::from(vec![
+            Span::styled("  w ", key_style),
+            Span::raw(" Write hex to memory"),
+        ]),
+        Line::from(vec![
+            Span::styled("  W ", key_style),
+            Span::raw(" Write string to memory"),
+        ]),
+        Line::from(vec![
+            Span::styled("  u ", key_style),
+            Span::raw(" Upload bytes to memory"),
+        ]),
+        Line::from(vec![
+            Span::styled("  U ", key_style),
+            Span::raw(" Upload string to memory"),
+        ]),
+        Line::from(vec![
+            Span::styled("  b ", key_style),
+            Span::raw(" Set breakpoint"),
+        ]),
+        Line::from(vec![
+            Span::styled("  C ", key_style),
+            Span::raw(" Call function"),
+        ]),
+        Line::from(vec![
+            Span::styled("  l ", key_style),
+            Span::raw(" Load shared library"),
+        ]),
+        Line::from(vec![
+            Span::styled("  a ", key_style),
+            Span::raw(" Watch memory"),
+        ]),
+        Line::from(vec![Span::raw("")]),
         Line::from(vec![Span::styled("Hex Dump View", header_style)]),
         Line::from(vec![
             Span::styled("  / ", key_style),
@@ -131,6 +165,10 @@ pub fn render_help(f: &mut Frame, area: Rect) {
             Span::raw(" Parasite restore"),
         ]),
         Line::from(vec![
+            Span::styled("  w/W ", key_style),
+            Span::raw(" Write to checkpoint"),
+        ]),
+        Line::from(vec![
             Span::styled("  d ", key_style),
             Span::raw(" Delete checkpoint"),
         ]),
@@ -139,14 +177,14 @@ pub fn render_help(f: &mut Frame, area: Rect) {
             Span::raw(" Filter checkpoints"),
         ]),
         Line::from(vec![Span::raw("")]),
-        Line::from(vec![Span::styled("Advanced", header_style)]),
+        Line::from(vec![Span::styled("Extended Commands", header_style)]),
         Line::from(vec![
             Span::styled("  i ", key_style),
-            Span::raw(" Inject shellcode (Processes)"),
+            Span::raw(" Inject shellcode"),
         ]),
         Line::from(vec![
             Span::styled("  x ", key_style),
-            Span::raw(" Resolve symbol (Processes)"),
+            Span::raw(" Resolve symbol"),
         ]),
     ];
 

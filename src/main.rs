@@ -190,6 +190,26 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> Result<()> {
             } else if app.is_hex_searching {
                 app.hex_search.push(' ');
                 app.set_status(format!("Hex search: {}", app.hex_search));
+            } else if app.extended_mode {
+                app.extended_command.push(' ');
+                let prompt = match app.extended_command_type.as_str() {
+                    "resolve" => "Extended command (resolve <symbol>): ",
+                    "inject_shellcode" => "Shellcode (hex, e.g., 90cc): ",
+                    "write_addr" => "Write - Enter address (0x...): ",
+                    "write_hex" => "Write - Enter hex bytes: ",
+                    "write_string" => "Write - Enter string: ",
+                    "write_dump_hex" => "Write dump - Enter hex bytes: ",
+                    "write_dump_string" => "Write dump - Enter string: ",
+                    "call_addr" => "Call - Enter address (0x...): ",
+                    "call_args" => "Call - Enter args: ",
+                    "upload_hex" => "Upload - Enter hex bytes: ",
+                    "upload_str" => "Upload string - Enter string: ",
+                    "breakpoint" => "Breakpoint - Enter address (0x...): ",
+                    "load_so" => "Load SO - Enter library path: ",
+                    "watch" => "Watch - Enter address (0x...): ",
+                    _ => "Extended command: ",
+                };
+                app.set_status(format!("{}{}", prompt, app.extended_command));
             } else {
                 app.focus = match app.focus {
                     Focus::List => Focus::Output,
@@ -206,6 +226,8 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> Result<()> {
                 app.extended_mode = false;
                 app.extended_command.clear();
                 app.extended_command_type.clear();
+                app.pending_write_addr = None;
+                app.write_mode.clear();
                 app.clear_status();
             } else if app.is_searching {
                 let current_tab = app.tab;
@@ -314,18 +336,295 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> Result<()> {
                             }
                         }
                     }
+                    "call_addr" => {
+                        let input = app.extended_command.trim().to_string();
+                        if input.starts_with("0x") || input.starts_with("0X") {
+                            let addr_str = &input[2..];
+                            if let Ok(addr) = u64::from_str_radix(addr_str, 16) {
+                                app.pending_write_addr = Some(addr);
+                                app.extended_command_type = "call_args".to_string();
+                                app.extended_command.clear();
+                                app.set_status(format!(
+                                    "Call 0x{:x} - Enter args (or Enter): ",
+                                    addr
+                                ));
+                            } else {
+                                app.set_error("Invalid address format".to_string());
+                                app.extended_mode = false;
+                                app.extended_command.clear();
+                                app.extended_command_type.clear();
+                            }
+                        } else {
+                            app.set_error("Address must start with 0x".to_string());
+                            app.extended_mode = false;
+                            app.extended_command.clear();
+                            app.extended_command_type.clear();
+                        }
+                    }
+                    "write_addr" => {
+                        let input = app.extended_command.trim().to_string();
+                        if input.starts_with("0x") || input.starts_with("0X") {
+                            let addr_str = &input[2..];
+                            if let Ok(addr) = u64::from_str_radix(addr_str, 16) {
+                                app.pending_write_addr = Some(addr);
+                                match app.write_mode.as_str() {
+                                    "write" => {
+                                        app.extended_command_type = "write_hex".to_string();
+                                        app.extended_command.clear();
+                                        app.set_status(format!(
+                                            "Write to 0x{:x} - Enter hex: ",
+                                            addr
+                                        ));
+                                    }
+                                    "write_str" => {
+                                        app.extended_command_type = "write_string".to_string();
+                                        app.extended_command.clear();
+                                        app.set_status(format!(
+                                            "Write to 0x{:x} - Enter string: ",
+                                            addr
+                                        ));
+                                    }
+                                    "write_dump" => {
+                                        app.extended_command_type = "write_dump_hex".to_string();
+                                        app.extended_command.clear();
+                                        app.set_status(format!(
+                                            "Write dump to 0x{:x} - Enter hex: ",
+                                            addr
+                                        ));
+                                    }
+                                    "write_dump_str" => {
+                                        app.extended_command_type = "write_dump_string".to_string();
+                                        app.extended_command.clear();
+                                        app.set_status(format!(
+                                            "Write dump to 0x{:x} - Enter string: ",
+                                            addr
+                                        ));
+                                    }
+                                    "call" => {
+                                        app.extended_command_type = "call_args".to_string();
+                                        app.extended_command.clear();
+                                        app.set_status(format!(
+                                            "Call 0x{:x} - Enter args (or Enter): ",
+                                            addr
+                                        ));
+                                    }
+                                    _ => {}
+                                }
+                            } else {
+                                app.set_error("Invalid address format".to_string());
+                                app.extended_mode = false;
+                                app.extended_command.clear();
+                                app.extended_command_type.clear();
+                            }
+                        } else {
+                            app.set_error("Address must start with 0x".to_string());
+                            app.extended_mode = false;
+                            app.extended_command.clear();
+                            app.extended_command_type.clear();
+                        }
+                    }
+                    "write_hex" | "write_string" | "write_dump_hex" | "write_dump_string"
+                    | "call_args" => {
+                        let runner =
+                            wrapper::CkptminiRunner::new(PathBuf::from(&app.ckptmini_path));
+                        let addr = app.pending_write_addr.unwrap_or(0);
+                        let value = app.extended_command.clone();
+
+                        match app.extended_command_type.as_str() {
+                            "write_hex" => match runner.write(proc.pid, addr, &value) {
+                                Ok(result) => {
+                                    app.dump_output = result;
+                                    app.set_status(format!(
+                                        "Wrote {} bytes to 0x{:x}",
+                                        value.len() / 2,
+                                        addr
+                                    ));
+                                }
+                                Err(e) => {
+                                    app.set_error(format!("Write failed: {}", e));
+                                }
+                            },
+                            "write_string" => match runner.write_str(proc.pid, addr, &value) {
+                                Ok(result) => {
+                                    app.dump_output = result;
+                                    app.set_status(format!("Wrote string to 0x{:x}", addr));
+                                }
+                                Err(e) => {
+                                    app.set_error(format!("Write failed: {}", e));
+                                }
+                            },
+                            "write_dump_hex" => {
+                                if let Some(ckpt) = app.selected_checkpoint() {
+                                    match runner.write_dump(&ckpt.path, addr, &value) {
+                                        Ok(result) => {
+                                            app.dump_output = result;
+                                            app.set_status(format!(
+                                                "Wrote {} bytes to dump at 0x{:x}",
+                                                value.len() / 2,
+                                                addr
+                                            ));
+                                        }
+                                        Err(e) => {
+                                            app.set_error(format!("Write dump failed: {}", e));
+                                        }
+                                    }
+                                }
+                            }
+                            "write_dump_string" => {
+                                if let Some(ckpt) = app.selected_checkpoint() {
+                                    match runner.write_dump_str(&ckpt.path, addr, &value) {
+                                        Ok(result) => {
+                                            app.dump_output = result;
+                                            app.set_status(format!(
+                                                "Wrote string to dump at 0x{:x}",
+                                                addr
+                                            ));
+                                        }
+                                        Err(e) => {
+                                            app.set_error(format!("Write dump failed: {}", e));
+                                        }
+                                    }
+                                }
+                            }
+                            "call_args" => {
+                                let args: Vec<&str> = value.split_whitespace().collect();
+                                match runner.call(proc.pid, addr, &args) {
+                                    Ok(result) => {
+                                        app.dump_output = result;
+                                        app.set_status(format!("Called function at 0x{:x}", addr));
+                                    }
+                                    Err(e) => {
+                                        app.set_error(format!("Call failed: {}", e));
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                        app.pending_write_addr = None;
+                    }
+                    "upload_hex" => {
+                        let runner =
+                            wrapper::CkptminiRunner::new(PathBuf::from(&app.ckptmini_path));
+                        let hex = app.extended_command.trim().to_string();
+                        match runner.upload(proc.pid, &hex, Some("rwx")) {
+                            Ok(result) => {
+                                app.dump_output = result;
+                                app.set_status(format!("Uploaded {} bytes", hex.len() / 2));
+                            }
+                            Err(e) => {
+                                app.set_error(format!("Upload failed: {}", e));
+                            }
+                        }
+                    }
+                    "upload_str" => {
+                        let runner =
+                            wrapper::CkptminiRunner::new(PathBuf::from(&app.ckptmini_path));
+                        let s = app.extended_command.trim().to_string();
+                        match runner.upload_str(proc.pid, &s, Some("rwx")) {
+                            Ok(result) => {
+                                app.dump_output = result;
+                                app.set_status(format!("Uploaded string '{}'", s));
+                            }
+                            Err(e) => {
+                                app.set_error(format!("Upload failed: {}", e));
+                            }
+                        }
+                    }
+                    "breakpoint" => {
+                        let input = app.extended_command.trim().to_string();
+                        if input.starts_with("0x") || input.starts_with("0X") {
+                            let addr_str = &input[2..];
+                            if let Ok(addr) = u64::from_str_radix(addr_str, 16) {
+                                let runner =
+                                    wrapper::CkptminiRunner::new(PathBuf::from(&app.ckptmini_path));
+                                match runner.breakpoint(proc.pid, addr) {
+                                    Ok(result) => {
+                                        app.dump_output = result;
+                                        app.set_status(format!("Breakpoint set at 0x{:x}", addr));
+                                    }
+                                    Err(e) => {
+                                        app.set_error(format!("Breakpoint failed: {}", e));
+                                    }
+                                }
+                            } else {
+                                app.set_error("Invalid address format".to_string());
+                            }
+                        } else {
+                            app.set_error("Address must start with 0x".to_string());
+                        }
+                    }
+                    "load_so" => {
+                        let path = app.extended_command.trim().to_string();
+                        if !path.is_empty() {
+                            let runner =
+                                wrapper::CkptminiRunner::new(PathBuf::from(&app.ckptmini_path));
+                            match runner.load_so(proc.pid, &path) {
+                                Ok(result) => {
+                                    app.dump_output = result;
+                                    app.set_status(format!("Loaded shared library: {}", path));
+                                }
+                                Err(e) => {
+                                    app.set_error(format!("load_so failed: {}", e));
+                                }
+                            }
+                        }
+                    }
+                    "watch" => {
+                        let input = app.extended_command.trim().to_string();
+                        if input.starts_with("0x") || input.starts_with("0X") {
+                            let addr_str = &input[2..];
+                            if let Ok(addr) = u64::from_str_radix(addr_str, 16) {
+                                let runner =
+                                    wrapper::CkptminiRunner::new(PathBuf::from(&app.ckptmini_path));
+                                match runner.watch(proc.pid, addr) {
+                                    Ok(result) => {
+                                        app.dump_output = result;
+                                        app.set_status(format!("Watching 0x{:x}", addr));
+                                    }
+                                    Err(e) => {
+                                        app.set_error(format!("Watch failed: {}", e));
+                                    }
+                                }
+                            } else {
+                                app.set_error("Invalid address format".to_string());
+                            }
+                        } else {
+                            app.set_error("Address must start with 0x".to_string());
+                        }
+                    }
                     _ => {}
                 }
             }
-            app.extended_mode = false;
+            if !app.extended_command_type.starts_with("write_")
+                && !app.extended_command_type.starts_with("upload_")
+                && app.extended_command_type != "call_args"
+            {
+                app.extended_mode = false;
+            }
+            if app.extended_mode {
+                app.write_mode.clear();
+            } else {
+                app.pending_write_addr = None;
+                app.write_mode.clear();
+            }
             app.extended_command.clear();
-            app.extended_command_type.clear();
         }
         KeyCode::Char(c) if app.extended_mode => {
             app.extended_command.push(c);
             let prompt = match app.extended_command_type.as_str() {
                 "resolve" => "Extended command (resolve <symbol>): ",
                 "inject_shellcode" => "Shellcode (hex, e.g., 90cc): ",
+                "write_addr" => "Write - Enter address (0x...): ",
+                "write_hex" => "Write - Enter hex bytes: ",
+                "write_string" => "Write - Enter string: ",
+                "write_dump_hex" => "Write dump - Enter hex bytes: ",
+                "write_dump_string" => "Write dump - Enter string: ",
+                "call_args" => "Call - Enter args: ",
+                "upload_hex" => "Upload - Enter hex bytes: ",
+                "upload_str" => "Upload string - Enter string: ",
+                "breakpoint" => "Breakpoint - Enter address (0x...): ",
+                "load_so" => "Load SO - Enter library path: ",
+                "watch" => "Watch - Enter address (0x...): ",
                 _ => "Extended command: ",
             };
             app.set_status(format!("{}{}", prompt, app.extended_command));
@@ -335,6 +634,17 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> Result<()> {
             let prompt = match app.extended_command_type.as_str() {
                 "resolve" => "Extended command (resolve <symbol>): ",
                 "inject_shellcode" => "Shellcode (hex, e.g., 90cc): ",
+                "write_addr" => "Write - Enter address (0x...): ",
+                "write_hex" => "Write - Enter hex bytes: ",
+                "write_string" => "Write - Enter string: ",
+                "write_dump_hex" => "Write dump - Enter hex bytes: ",
+                "write_dump_string" => "Write dump - Enter string: ",
+                "call_args" => "Call - Enter args: ",
+                "upload_hex" => "Upload - Enter hex bytes: ",
+                "upload_str" => "Upload string - Enter string: ",
+                "breakpoint" => "Breakpoint - Enter address (0x...): ",
+                "load_so" => "Load SO - Enter library path: ",
+                "watch" => "Watch - Enter address (0x...): ",
                 _ => "Extended command: ",
             };
             if app.extended_command.is_empty() {
@@ -473,22 +783,33 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> Result<()> {
             app.set_status("Checkpoint cancelled".to_string());
         }
         KeyCode::Char('u') => {
-            if matches!(app.tab, Tab::Checkpoints) {
-                let (ckpt_pid, ckpt_path) = app
-                    .selected_checkpoint()
-                    .map(|c| (c.pid, c.path.clone()))
-                    .unwrap_or((0, PathBuf::new()));
+            if !app.is_searching && !app.is_hex_searching {
+                if matches!(app.tab, Tab::Checkpoints) {
+                    let (ckpt_pid, ckpt_path) = app
+                        .selected_checkpoint()
+                        .map(|c| (c.pid, c.path.clone()))
+                        .unwrap_or((0, PathBuf::new()));
 
-                if ckpt_pid > 0 {
-                    app.set_status(format!("Restoring checkpoint to PID {}...", ckpt_pid));
-                    let runner = wrapper::CkptminiRunner::new(PathBuf::from(&app.ckptmini_path));
-                    match runner.restore(ckpt_pid, &ckpt_path) {
-                        Ok(_) => {
-                            app.set_status(format!("Restored checkpoint to PID {}", ckpt_pid));
+                    if ckpt_pid > 0 {
+                        app.set_status(format!("Restoring checkpoint to PID {}...", ckpt_pid));
+                        let runner =
+                            wrapper::CkptminiRunner::new(PathBuf::from(&app.ckptmini_path));
+                        match runner.restore(ckpt_pid, &ckpt_path) {
+                            Ok(_) => {
+                                app.set_status(format!("Restored checkpoint to PID {}", ckpt_pid));
+                            }
+                            Err(e) => {
+                                app.set_error(format!("Restore failed: {}", e));
+                            }
                         }
-                        Err(e) => {
-                            app.set_error(format!("Restore failed: {}", e));
-                        }
+                    }
+                } else if matches!(app.tab, Tab::Memory) {
+                    if app.selected_process().is_some() {
+                        app.extended_mode = true;
+                        app.write_mode = "upload".to_string();
+                        app.extended_command.clear();
+                        app.extended_command_type = "upload_hex".to_string();
+                        app.set_status("Upload - Enter hex bytes: ".to_string());
                     }
                 }
             }
@@ -547,6 +868,118 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> Result<()> {
             app.extended_command.clear();
             app.extended_command_type = "resolve".to_string();
             app.set_status("Extended command (resolve <symbol>): ".to_string());
+        }
+        KeyCode::Char('w') => {
+            if !app.is_searching && !app.is_hex_searching {
+                if matches!(app.tab, Tab::Memory) {
+                    if app.selected_process().is_some() && app.selected_memory_region().is_some() {
+                        app.extended_mode = true;
+                        app.write_mode = "write".to_string();
+                        app.extended_command.clear();
+                        app.extended_command_type = "write_addr".to_string();
+                        app.pending_write_addr = None;
+                        app.set_status("Write - Enter address (0x...): ".to_string());
+                    }
+                } else if matches!(app.tab, Tab::Checkpoints) {
+                    if app.selected_checkpoint().is_some() {
+                        app.extended_mode = true;
+                        app.write_mode = "write_dump".to_string();
+                        app.extended_command.clear();
+                        app.extended_command_type = "write_addr".to_string();
+                        app.pending_write_addr = None;
+                        app.set_status("Write dump - Enter address (0x...): ".to_string());
+                    }
+                }
+            }
+        }
+        KeyCode::Char('W') => {
+            if !app.is_searching && !app.is_hex_searching {
+                if matches!(app.tab, Tab::Memory) {
+                    if app.selected_process().is_some() && app.selected_memory_region().is_some() {
+                        app.extended_mode = true;
+                        app.write_mode = "write_str".to_string();
+                        app.extended_command.clear();
+                        app.extended_command_type = "write_addr".to_string();
+                        app.pending_write_addr = None;
+                        app.set_status("Write string - Enter address (0x...): ".to_string());
+                    }
+                } else if matches!(app.tab, Tab::Checkpoints) {
+                    if app.selected_checkpoint().is_some() {
+                        app.extended_mode = true;
+                        app.write_mode = "write_dump_str".to_string();
+                        app.extended_command.clear();
+                        app.extended_command_type = "write_addr".to_string();
+                        app.pending_write_addr = None;
+                        app.set_status("Write dump string - Enter address (0x...): ".to_string());
+                    }
+                }
+            }
+        }
+        KeyCode::Char('U') => {
+            if !app.is_searching && !app.is_hex_searching {
+                if matches!(app.tab, Tab::Memory) {
+                    if app.selected_process().is_some() {
+                        app.extended_mode = true;
+                        app.write_mode = "upload_str".to_string();
+                        app.extended_command.clear();
+                        app.extended_command_type = "upload_str".to_string();
+                        app.set_status("Upload string - Enter string: ".to_string());
+                    }
+                }
+            }
+        }
+        KeyCode::Char('b') => {
+            if !app.is_searching && !app.is_hex_searching {
+                if matches!(app.tab, Tab::Memory) {
+                    if app.selected_process().is_some() {
+                        app.extended_mode = true;
+                        app.write_mode = "breakpoint".to_string();
+                        app.extended_command.clear();
+                        app.extended_command_type = "breakpoint".to_string();
+                        app.set_status("Breakpoint - Enter address (0x...): ".to_string());
+                    }
+                }
+            }
+        }
+        KeyCode::Char('C') => {
+            if !app.is_searching && !app.is_hex_searching {
+                if matches!(app.tab, Tab::Memory) {
+                    if app.selected_process().is_some() {
+                        app.extended_mode = true;
+                        app.write_mode = "call".to_string();
+                        app.extended_command.clear();
+                        app.extended_command_type = "call_addr".to_string();
+                        app.pending_write_addr = None;
+                        app.set_status("Call - Enter address (0x...): ".to_string());
+                    }
+                }
+            }
+        }
+        KeyCode::Char('l') => {
+            if !app.is_searching && !app.is_hex_searching {
+                if matches!(app.tab, Tab::Memory) {
+                    if app.selected_process().is_some() {
+                        app.extended_mode = true;
+                        app.write_mode = "load_so".to_string();
+                        app.extended_command.clear();
+                        app.extended_command_type = "load_so".to_string();
+                        app.set_status("Load shared library - Enter path: ".to_string());
+                    }
+                }
+            }
+        }
+        KeyCode::Char('a') => {
+            if !app.is_searching && !app.is_hex_searching {
+                if matches!(app.tab, Tab::Memory) {
+                    if app.selected_process().is_some() {
+                        app.extended_mode = true;
+                        app.write_mode = "watch".to_string();
+                        app.extended_command.clear();
+                        app.extended_command_type = "watch".to_string();
+                        app.set_status("Watch - Enter address (0x...): ".to_string());
+                    }
+                }
+            }
         }
         KeyCode::Char('v') => {
             if matches!(app.tab, Tab::Memory) {
